@@ -17,8 +17,8 @@ milliseconds = int(time() * 1000)
 parse = argparse.ArgumentParser(description="Depth Map Fusion Deep Network evaluation.")
 
 parse.add_argument("-m", "--method", default="colmap", type=str, help="Method name (e.x. colmap).")
-parse.add_argument("-d", "--data_path", default="../data", type=str, help="Path to the DTU evaluation data.")
-parse.add_argument("-r", "--results_path", default="../results", type=str, help="Output results path where the output evaluation metrics will be stored.")
+parse.add_argument("-d", "--data_path", default="../../mvs_data", type=str, help="Path to the DTU evaluation data.")
+parse.add_argument("-r", "--results_path", default="../../Results", type=str, help="Output results path where the output evaluation metrics will be stored.")
 parse.add_argument("-l", "--light_setting", default="l3", type=str, help="DTU light setting.")
 parse.add_argument("-p", "--representation", default="Points", type=str, help="Data representation (Points/Surface).")
 parse.add_argument("-e", "--eval_list", default="1,9,23,77,114", type=str, help="Scene evaluation list following the format '#,#,#,#' (e.x. '1,9,23,77,114') COMMA-SEPARATED, NO-SPACES.")
@@ -186,7 +186,7 @@ def main():
 
         # read in ground-truth point cloud
         gt_ply_filename = "stl{:03d}_total.ply".format(scan_num)
-        gt_ply_path = os.path.join(ARGS.data_path, "Points", "ground_truth", gt_ply_filename)
+        gt_ply_path = os.path.join(ARGS.data_path, "Points", "stl", gt_ply_filename)
         gt_ply = read_point_cloud(gt_ply_path) # already reduced to 0.2mm density, so no downsampling needed
 
         # build points filter based on input mask
