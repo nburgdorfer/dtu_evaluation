@@ -179,25 +179,50 @@ def main():
         P = np.asarray(data["P"])
 
         # read in estimated point cloud
+        print("Reading in estimated point cloud...", end=" ")
+        start = time()
         est_ply_filename = "{}{:03d}_{}{}.ply".format(ARGS.method, scan_num, ARGS.light_setting, settings_string)
         est_ply_path = os.path.join(ARGS.data_path, ARGS.representation, ARGS.method, est_ply_filename)
         est_ply = read_point_cloud(est_ply_path)
         est_ply = reduce_points(est_ply, min_dist)
+        end = time()
+        dur = end-start
+        print("{:0.3f} s".format(dur))
 
         # read in ground-truth point cloud
+        print("Reading in ground-truth point cloud...", end=" ")
+        start = time()
         gt_ply_filename = "stl{:03d}_total.ply".format(scan_num)
         gt_ply_path = os.path.join(ARGS.data_path, "Points", "stl", gt_ply_filename)
         gt_ply = read_point_cloud(gt_ply_path) # already reduced to 0.2mm density, so no downsampling needed
+        end = time()
+        dur = end-start
+        print("{:0.3f} s".format(dur))
 
         # build points filter based on input mask
+        print("Building estimated point cloud filter...", end=" ")
+        start = time()
         est_filt = build_est_points_filter(est_ply, min_bound, res, mask)
+        end = time()
+        dur = end-start
+        print("{:0.3f} s".format(dur))
 
         # build points filter based on input mask
+        print("Building ground-truth point cloud filter...", end=" ")
+        start = time()
         gt_filt = build_gt_points_filter(gt_ply, P)
+        end = time()
+        dur = end-start
+        print("{:0.3f} s".format(dur))
 
         # compute distances between point clouds
+        print("Comparing point clouds...", end=" ")
+        start = time()
         (num_est, num_gt, mean_acc, mean_comp, var_acc, var_comp, med_acc, med_comp) = \
                 compare_points(est_ply, gt_ply, ARGS.data_path, max_dist, est_filt, gt_filt)
+        end = time()
+        dur = end-start
+        print("{:0.3f} s".format(dur))
 
         end = time()
         dur = end-start
