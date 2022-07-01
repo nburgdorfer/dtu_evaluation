@@ -34,7 +34,6 @@ def read_point_cloud(ply_path):
         print("Error: file {} is not a '.ply' file.".format(ply_path))
 
     ply = o3d.io.read_point_cloud(ply_path, format="ply")
-    o3d.io.write_point_cloud(ply_path[:-3]+"pcd", ply)
 
     return ply
 
@@ -51,8 +50,8 @@ def reduce_points(ply, min_dist):
 
     for i in range(0,n,step_size):
         batch = rand_inds[i:i+step_size]
-        rand_points = points[batch]
-        inds = tree.query_radius(rand_points, r=min_dist, return_distance=False)
+        rand_points = np.asarray(points[batch])
+        inds = tree.query_radius(rand_points, r=min_dist)
 
         for i in range(len(inds)):
             ind = batch[i]
@@ -160,7 +159,7 @@ def main():
     avg_dur = 0.0
 
     for scan_num in eval_list:
-        start = time()
+        start_total = time()
         print("\nEvaluating scan{:03d}...".format(scan_num))
 
         # read in matlab bounding box, mask, and resolution
@@ -180,63 +179,30 @@ def main():
         P = np.asarray(data["P"])
 
         # read in estimated point cloud
-        print("Reading in estimated point cloud...", end=" ")
-        sys.stdout.flush()
-        start = time()
         est_ply_filename = "{}{:03d}_{}{}.ply".format(ARGS.method, scan_num, ARGS.light_setting, settings_string)
         est_ply_path = os.path.join(ARGS.data_path, ARGS.representation, ARGS.method, est_ply_filename)
         est_ply = read_point_cloud(est_ply_path)
+
+        # reduce estimated point cloud
         est_ply = reduce_points(est_ply, min_dist)
-        end = time()
-        dur = end-start
-        print("{:0.3f} s".format(dur))
-        sys.stdout.flush()
-        sys.exit()
 
         # read in ground-truth point cloud
-        print("Reading in ground-truth point cloud...", end=" ")
-        sys.stdout.flush()
-        start = time()
         gt_ply_filename = "stl{:03d}_total.ply".format(scan_num)
         gt_ply_path = os.path.join(ARGS.data_path, "Points", "stl", gt_ply_filename)
         gt_ply = read_point_cloud(gt_ply_path) # already reduced to 0.2mm density, so no downsampling needed
-        end = time()
-        dur = end-start
-        print("{:0.3f} s".format(dur))
-        sys.stdout.flush()
 
         # build points filter based on input mask
-        print("Building estimated point cloud filter...", end=" ")
-        sys.stdout.flush()
-        start = time()
         est_filt = build_est_points_filter(est_ply, min_bound, res, mask)
-        end = time()
-        dur = end-start
-        print("{:0.3f} s".format(dur))
-        sys.stdout.flush()
 
         # build points filter based on input mask
-        print("Building ground-truth point cloud filter...", end=" ")
-        sys.stdout.flush()
-        start = time()
         gt_filt = build_gt_points_filter(gt_ply, P)
-        end = time()
-        dur = end-start
-        print("{:0.3f} s".format(dur))
-        sys.stdout.flush()
 
         # compute distances between point clouds
-        print("Comparing point clouds...", end=" ")
-        start = time()
         (num_est, num_gt, mean_acc, mean_comp, var_acc, var_comp, med_acc, med_comp) = \
                 compare_points(est_ply, gt_ply, ARGS.data_path, max_dist, est_filt, gt_filt)
-        end = time()
-        dur = end-start
-        print("{:0.3f} s".format(dur))
-        sys.stdout.flush()
 
-        end = time()
-        dur = end-start
+        end_total = time()
+        dur = end_total-start_total
 
         # display current evaluation
         print("Num Est: {}".format(int(num_est)))
