@@ -33,7 +33,8 @@ def read_point_cloud(ply_path):
     if(ply_path[-3:] != "ply"):
         print("Error: file {} is not a '.ply' file.".format(ply_path))
 
-    ply = o3d.io.read_point_cloud(ply_path)
+    ply = o3d.io.read_point_cloud(ply_path, format="ply")
+    o3d.io.write_point_cloud(ply_path[:-3]+"pcd", ply)
 
     return ply
 
@@ -180,6 +181,7 @@ def main():
 
         # read in estimated point cloud
         print("Reading in estimated point cloud...", end=" ")
+        sys.stdout.flush()
         start = time()
         est_ply_filename = "{}{:03d}_{}{}.ply".format(ARGS.method, scan_num, ARGS.light_setting, settings_string)
         est_ply_path = os.path.join(ARGS.data_path, ARGS.representation, ARGS.method, est_ply_filename)
@@ -188,9 +190,12 @@ def main():
         end = time()
         dur = end-start
         print("{:0.3f} s".format(dur))
+        sys.stdout.flush()
+        sys.exit()
 
         # read in ground-truth point cloud
         print("Reading in ground-truth point cloud...", end=" ")
+        sys.stdout.flush()
         start = time()
         gt_ply_filename = "stl{:03d}_total.ply".format(scan_num)
         gt_ply_path = os.path.join(ARGS.data_path, "Points", "stl", gt_ply_filename)
@@ -198,22 +203,27 @@ def main():
         end = time()
         dur = end-start
         print("{:0.3f} s".format(dur))
+        sys.stdout.flush()
 
         # build points filter based on input mask
         print("Building estimated point cloud filter...", end=" ")
+        sys.stdout.flush()
         start = time()
         est_filt = build_est_points_filter(est_ply, min_bound, res, mask)
         end = time()
         dur = end-start
         print("{:0.3f} s".format(dur))
+        sys.stdout.flush()
 
         # build points filter based on input mask
         print("Building ground-truth point cloud filter...", end=" ")
+        sys.stdout.flush()
         start = time()
         gt_filt = build_gt_points_filter(gt_ply, P)
         end = time()
         dur = end-start
         print("{:0.3f} s".format(dur))
+        sys.stdout.flush()
 
         # compute distances between point clouds
         print("Comparing point clouds...", end=" ")
@@ -223,6 +233,7 @@ def main():
         end = time()
         dur = end-start
         print("{:0.3f} s".format(dur))
+        sys.stdout.flush()
 
         end = time()
         dur = end-start
