@@ -194,7 +194,8 @@ def main():
         P = np.asarray(data["P"])
 
         # read in point clouds
-        est_ply_path = os.path.join(ply_path, ARGS.ply_file_name)
+        ply_file_name = "fusion{:03d}_l3.ply".format(scan_num)
+        est_ply_path = os.path.join(ply_path, ply_file_name)
         est_ply = read_point_cloud(est_ply_path, ARGS.voxel_size)
         gt_ply_filename = "stl{:03d}_total.ply".format(scan_num)
         gt_ply_path = os.path.join(ARGS.data_path, "Points", "stl", gt_ply_filename)
