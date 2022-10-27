@@ -25,7 +25,7 @@ parse.add_argument("-o", "--output_path", default="../../Output", type=str, help
 parse.add_argument("-s", "--points_path", default="../../Points", type=str)
 parse.add_argument("-y", "--ply_file_name", default="output.ply", type=str, help="File name for the estimated point clouds.")
 parse.add_argument("-e", "--eval_list", default="1,9,23,77,114", type=str, help="Scene evaluation list following the format '#,#,#,#' (e.x. '1,9,23,77,114') COMMA-SEPARATED, NO-SPACES.")
-parse.add_argument("-v", "--voxel_size", default=0.2, type=float, help="Voxel size used for consistent downsampling.")
+parse.add_argument("-q", "--min_point_dist", default=0.2, type=float, help="Minimum distance between points for downsampling.")
 parse.add_argument("-x", "--max_dist", default=0.4, type=float, help="Max distance threshold for point matching.")
 parse.add_argument("-k", "--mask_th", default=20.0, type=float, help="Max distance for masking.")
 parse.add_argument("-n", "--min_dist", default=0.0, type=float, help="Min distance threshold for point matching")
@@ -39,18 +39,29 @@ def true_round(n):
 def save_ply(file_path, ply):
     o3d.io.write_point_cloud(file_path, ply)
 
-def read_point_cloud(ply_path, voxel_size=None):
+def read_point_cloud(ply_path):
     if(ply_path[-3:] != "ply"):
         print("Error: file {} is not a '.ply' file.".format(ply_path))
 
-    ply = o3d.io.read_point_cloud(ply_path, format="ply")
-    if (voxel_size != None):
-        ply = ply.voxel_down_sample(voxel_size=voxel_size)
+    return o3d.io.read_point_cloud(ply_path, format="ply")
+
+def downsample_cloud(ply, min_point_dist):
+    ply = ply.voxel_down_sample(voxel_size=min_point_dist)
 
     return ply
 
-def build_est_points_filter(ply, min_bound, res, mask):
-    points = np.asarray(ply.points).transpose()
+def build_est_points_filter(est_ply, data_path, scan_num):
+    # read in matlab bounding box, mask, and resolution
+    mask_filename = "ObsMask{}_10.mat".format(scan_num)
+    mask_path = os.path.join(data_path, "ObsMask", mask_filename)
+    data = sio.loadmat(mask_path)
+    bounds = np.asarray(data["BB"])
+    min_bound = bounds[0,:]
+    max_bound = bounds[1,:]
+    mask = np.asarray(data["ObsMask"])
+    res = int(data["Res"])
+
+    points = np.asarray(est_ply.points).transpose()
     shape = points.shape
     mask_shape = mask.shape
     filt = np.zeros(shape[1])
@@ -78,7 +89,13 @@ def build_est_points_filter(ply, min_bound, res, mask):
 
     return filt
 
-def build_gt_points_filter(ply, P):
+def build_gt_points_filter(ply, data_path, scan_num):
+    # read in matlab gt plane 
+    mask_filename = "Plane{}.mat".format(scan_num)
+    mask_path = os.path.join(data_path, "ObsMask", mask_filename)
+    data = sio.loadmat(mask_path)
+    P = np.asarray(data["P"])
+
     points = np.asarray(ply.points).transpose()
     shape = points.shape
 
@@ -93,27 +110,40 @@ def build_gt_points_filter(ply, P):
 
     return filt
 
-def filter_ply(est_ply, gt_ply, mask_th):
+def filter_outlier_points(est_ply, gt_ply, outlier_th):
     dists_est = np.asarray(est_ply.compute_point_cloud_distance(gt_ply))
-    valid_dists = np.where(dists_est <= mask_th)[0]
+    valid_dists = np.where(dists_est <= outlier_th)[0]
     return est_ply.select_by_index(valid_dists)
 
 def compare_point_clouds(est_ply, gt_ply, mask_th, max_dist, min_dist, est_filt=None, gt_filt=None):
     mask_gt = 20.0
+    inlier_th = 0.5
 
-    # compute bi-directional distance between point clouds
+    # compute bi-directional chamfer distance between point clouds
     dists_est = np.asarray(est_ply.compute_point_cloud_distance(gt_ply))
     valid_inds_est = set(np.where(est_filt == 1)[0])
     valid_dists = set(np.where(dists_est <= mask_th)[0])
     valid_inds_est.intersection_update(valid_dists)
+    inlier_inds_est = set(np.where(dists_est < inlier_th)[0])
+    inlier_inds_est.intersection_update(valid_inds_est)
+    outlier_inds_est = set(np.where(dists_est >= inlier_th)[0])
+    outlier_inds_est.intersection_update(valid_inds_est)
     valid_inds_est = np.asarray(list(valid_inds_est))
+    inlier_inds_est = np.asarray(list(inlier_inds_est))
+    outlier_inds_est = np.asarray(list(outlier_inds_est))
     dists_est = dists_est[valid_inds_est]
 
     dists_gt = np.asarray(gt_ply.compute_point_cloud_distance(est_ply))
     valid_inds_gt = set(np.where(gt_filt == 1)[0])
     valid_dists = set(np.where(dists_gt <= mask_gt)[0])
     valid_inds_gt.intersection_update(valid_dists)
+    inlier_inds_gt = set(np.where(dists_gt < inlier_th)[0])
+    inlier_inds_gt.intersection_update(valid_inds_gt)
+    outlier_inds_gt = set(np.where(dists_gt >= inlier_th)[0])
+    outlier_inds_gt.intersection_update(valid_inds_gt)
     valid_inds_gt = np.asarray(list(valid_inds_gt))
+    inlier_inds_gt = np.asarray(list(inlier_inds_gt))
+    outlier_inds_gt = np.asarray(list(outlier_inds_gt))
     dists_gt = dists_gt[valid_inds_gt]
 
     # compute accuracy and competeness
@@ -155,7 +185,36 @@ def compare_point_clouds(est_ply, gt_ply, mask_th, max_dist, min_dist, est_filt=
     colors = cmap(np.ones(len(invalid_gt_ply.points)))[:, :3]
     invalid_gt_ply.colors = o3d.utility.Vector3dVector(colors)
 
-    return (valid_est_ply + invalid_est_ply, valid_gt_ply + invalid_gt_ply), (acc,comp), (prec, rec), (th_vals, prec_vals, rec_vals), (est_size, gt_size)
+    # color accuracy outliers
+    inlier_est_ply = est_ply.select_by_index(inlier_inds_est)
+    outlier_est_ply = est_ply.select_by_index(outlier_inds_est)
+    inlier_cmap = plt.get_cmap("binary")
+    outlier_cmap = plt.get_cmap("cool")
+    inlier_colors = inlier_cmap(np.ones(len(inlier_est_ply.points)))[:, :3]
+    outlier_colors = outlier_cmap(np.ones(len(outlier_est_ply.points)))[:, :3]
+    inlier_est_ply.colors = o3d.utility.Vector3dVector(inlier_colors)
+    outlier_est_ply.colors = o3d.utility.Vector3dVector(outlier_colors)
+
+    # color completeness outliers
+    inlier_gt_ply = gt_ply.select_by_index(inlier_inds_gt)
+    outlier_gt_ply = gt_ply.select_by_index(outlier_inds_gt)
+    inlier_cmap = plt.get_cmap("binary")
+    outlier_cmap = plt.get_cmap("cool")
+    inlier_colors = inlier_cmap(np.ones(len(inlier_gt_ply.points)))[:, :3]
+    outlier_colors = outlier_cmap(np.ones(len(outlier_gt_ply.points)))[:, :3]
+    inlier_gt_ply.colors = o3d.utility.Vector3dVector(inlier_colors)
+    outlier_gt_ply.colors = o3d.utility.Vector3dVector(outlier_colors)
+
+    precision_ply = valid_est_ply + invalid_est_ply
+    recall_ply = valid_gt_ply + invalid_gt_ply
+    acc_outliers_ply = inlier_est_ply+outlier_est_ply+invalid_est_ply
+    comp_outliers_ply = inlier_gt_ply+outlier_gt_ply+invalid_gt_ply
+
+    return  (precision_ply, recall_ply) \
+            ,(acc_outliers_ply, comp_outliers_ply) \
+            ,(acc,comp), (prec, rec) \
+            ,(th_vals, prec_vals, rec_vals) \
+            ,(est_size, gt_size)
 
 def main():
     # convert eval list to integers
@@ -175,39 +234,29 @@ def main():
     for scan_num in eval_list:
         start_total = time()
         print("\nEvaluating scan{:03d}...".format(scan_num))
-        ply_path = os.path.join(ARGS.output_path, "scan{}".format(str(scan_num).zfill(3)), ARGS.points_path)
-
-        # read in matlab bounding box, mask, and resolution
-        mask_filename = "ObsMask{}_10.mat".format(scan_num)
-        mask_path = os.path.join(ARGS.data_path, "ObsMask", mask_filename)
-        data = sio.loadmat(mask_path)
-        bounds = np.asarray(data["BB"])
-        min_bound = bounds[0,:]
-        max_bound = bounds[1,:]
-        mask = np.asarray(data["ObsMask"])
-        res = int(data["Res"])
-
-        # read in matlab gt plane 
-        mask_filename = "Plane{}.mat".format(scan_num)
-        mask_path = os.path.join(ARGS.data_path, "ObsMask", mask_filename)
-        data = sio.loadmat(mask_path)
-        P = np.asarray(data["P"])
 
         # read in point clouds
-        ply_file_name = "fusion{:03d}_l3.ply".format(scan_num)
-        est_ply_path = os.path.join(ply_path, ply_file_name)
-        est_ply = read_point_cloud(est_ply_path, ARGS.voxel_size)
+        est_ply_filename = "fusion{:03d}_l3.ply".format(scan_num)
+        est_ply_path = os.path.join(ARGS.output_path, "scan{}".format(str(scan_num).zfill(3)), ARGS.points_path, est_ply_filename)
+        est_ply = read_point_cloud(est_ply_path)
+        est_ply = downsample_cloud(est_ply, ARGS.min_point_dist)
+
         gt_ply_filename = "stl{:03d}_total.ply".format(scan_num)
         gt_ply_path = os.path.join(ARGS.data_path, "Points", "stl", gt_ply_filename)
-        gt_ply = read_point_cloud(gt_ply_path, ARGS.voxel_size)
+        gt_ply = read_point_cloud(gt_ply_path)
 
         # build points filter based on input mask
-        est_ply = filter_ply(est_ply, gt_ply, ARGS.mask_th)
-        est_filt = build_est_points_filter(est_ply, min_bound, res, mask)
-        gt_filt = build_gt_points_filter(gt_ply, P)
+        est_ply = filter_outlier_points(est_ply, gt_ply, ARGS.mask_th)
+        est_filt = build_est_points_filter(est_ply, ARGS.data_path, scan_num)
+        gt_filt = build_gt_points_filter(gt_ply, ARGS.data_path, scan_num)
 
         # compute distances between point clouds
-        (precision_ply, recall_ply), (acc,comp), (prec, rec), (th_vals, prec_vals, rec_vals), (est_size, gt_size) = \
+        (precision_ply, recall_ply) \
+        ,(acc_outliers_ply, comp_outliers_ply) \
+        ,(acc,comp) \
+        ,(prec, rec) \
+        ,(th_vals, prec_vals, rec_vals) \
+        ,(est_size, gt_size) = \
         compare_point_clouds(est_ply, gt_ply, ARGS.mask_th, ARGS.max_dist, ARGS.min_dist, est_filt, gt_filt)
 
         end_total = time()
@@ -237,6 +286,14 @@ def main():
         recall_path = os.path.join(eval_path, "recall.ply")
         save_ply(recall_path, recall_ply)
 
+        # save binary accuracy point cloud
+        acc_outliers_path = os.path.join(eval_path, "acc_outliers.ply")
+        save_ply(acc_outliers_path, acc_outliers_ply)
+
+        # save recall point cloud
+        comp_outliers_path = os.path.join(eval_path, "comp_outliers.ply")
+        save_ply(comp_outliers_path, comp_outliers_ply)
+
         # create plots for incremental threshold values
         plot_filename = os.path.join(eval_path, "eval.png")
         plt.plot(th_vals, prec_vals, th_vals, rec_vals)
@@ -246,6 +303,7 @@ def main():
         plt.legend(("precision", "recall"))
         plt.grid()
         plt.savefig(plot_filename)
+        plt.close()
 
         # write all metrics to the evaluation file
         stats_file = os.path.join(eval_path, "metrics.txt")
