@@ -236,8 +236,9 @@ def main():
         print("\nEvaluating scan{:03d}...".format(scan_num))
 
         # read in point clouds
-        est_ply_filename = "fusion{:03d}_l3.ply".format(scan_num)
-        est_ply_path = os.path.join(ARGS.output_path, "scan{}".format(str(scan_num).zfill(3)), ARGS.points_path, est_ply_filename)
+        est_ply_filename = "{}{:03d}_l3.ply".format(ARGS.method,scan_num)
+        points_path = os.path.join(ARGS.output_path, "scan{}".format(str(scan_num).zfill(3)), ARGS.points_path)
+        est_ply_path = os.path.join(points_path, est_ply_filename)
         est_ply = read_point_cloud(est_ply_path)
         est_ply = downsample_cloud(est_ply, ARGS.min_point_dist)
 
@@ -273,7 +274,7 @@ def main():
 
 
         ##### Save metrics #####
-        eval_path = os.path.join(ply_path, "eval")
+        eval_path = os.path.join(points_path, "eval")
         if (os.path.exists(eval_path)):
             shutil.rmtree(eval_path)
         os.mkdir(eval_path)
@@ -309,7 +310,7 @@ def main():
         stats_file = os.path.join(eval_path, "metrics.txt")
         with open(stats_file, 'w') as f:
             f.write("Method: {}\n".format(ARGS.method))
-            f.write("Voxel_size: {:0.3f}mm | Max distance threshold: {:0.3f}mm | Min distance threshold: {:0.3f}mm | Mask threshold: {:0.3f}mm\n".format(ARGS.voxel_size, ARGS.max_dist, ARGS.min_dist, ARGS.mask_th))
+            f.write("Min_point_dist: {:0.3f}mm | Max distance threshold: {:0.3f}mm | Min distance threshold: {:0.3f}mm | Mask threshold: {:0.3f}mm\n".format(ARGS.min_point_dist, ARGS.max_dist, ARGS.min_dist, ARGS.mask_th))
             f.write("Source point cloud size: {}\n".format(est_size))
             f.write("Target point cloud size: {}\n".format(gt_size))
             f.write("Accuracy: {:0.3f}mm\n".format(acc))
