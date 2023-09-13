@@ -9,6 +9,7 @@ from random import seed
 import argparse
 import scipy.io as sio
 from sklearn.neighbors import KDTree
+from tqdm import tqdm
 
 seed(5)
 np.random.seed(5)
@@ -25,7 +26,7 @@ parse.add_argument("-o", "--output_path", default="../../Output", type=str, help
 parse.add_argument("-s", "--points_path", default="../../Points", type=str)
 parse.add_argument("-y", "--ply_file_name", default="output.ply", type=str, help="File name for the estimated point clouds.")
 parse.add_argument("-e", "--eval_list", default="1,9,23,77,114", type=str, help="Scene evaluation list following the format '#,#,#,#' (e.x. '1,9,23,77,114') COMMA-SEPARATED, NO-SPACES.")
-parse.add_argument("-q", "--min_point_dist", default=0.2, type=float, help="Minimum distance between points for downsampling.")
+parse.add_argument("-q", "--min_point_dist", default=0.20, type=float, help="Minimum distance between points for downsampling.")
 parse.add_argument("-x", "--max_dist", default=0.4, type=float, help="Max distance threshold for point matching.")
 parse.add_argument("-k", "--mask_th", default=20.0, type=float, help="Max distance for masking.")
 parse.add_argument("-n", "--min_dist", default=0.0, type=float, help="Min distance threshold for point matching")
@@ -45,10 +46,50 @@ def read_point_cloud(ply_path):
 
     return o3d.io.read_point_cloud(ply_path, format="ply")
 
-def downsample_cloud(ply, min_point_dist):
-    ply = ply.voxel_down_sample(voxel_size=min_point_dist)
+def downsample_cloud(cloud, min_point_dist):
+    return cloud.voxel_down_sample(voxel_size=min_point_dist)
 
-    return ply
+def remove_close_points(ply, min_point_dist):
+    # build KD-Tree of estimated point cloud for querying
+    tree = KDTree(np.asarray(ply.points), leaf_size=40)
+    (dists, inds) = tree.query(np.asarray(ply.points), k=2)
+
+    # ignore first nearest neighbor (since it is the point itself)
+    dists = dists[:,1]
+    inds = inds[:,1]
+
+    # get unique set of indices
+    ind_pairs = np.asarray([ np.asarray([min(i,inds[i]),max(i,inds[i])]) for i in range(len(inds)) ])
+    close_inds = np.where(dists < min_point_dist)[0]
+    print(close_inds.shape)
+    remove_inds = set()
+    pair_set = set()
+    
+    for ind in tqdm(close_inds):
+        i,j = ind_pairs[ind]
+
+        if ((i,j) not in pair_set):
+            remove_inds.add(i)
+            pair_set.add((i,j))
+
+    remove_inds = list(remove_inds)
+
+    #   for ind in tqdm(close_inds):
+    #       # check if index is in index pair list
+    #       same_inds = np.where(ind_pairs == ind)[0]
+    #       if (len(same_inds) > 0):
+    #           # add index to unique removal index list
+    #           unique_inds.append(ind)
+
+    #           for offset,i in enumerate(same_inds):
+    #               index = i - offset
+    #               ind_pairs = np.delete(ind_pairs, index, axis=0)
+
+
+    cloud = ply.select_by_index(remove_inds, invert=True)
+    print(len(cloud.points))
+
+    return cloud
 
 def build_est_points_filter(est_ply, data_path, scan_num):
     # read in matlab bounding box, mask, and resolution
@@ -149,6 +190,11 @@ def compare_point_clouds(est_ply, gt_ply, mask_th, max_dist, min_dist, est_filt=
     # compute accuracy and competeness
     acc = np.mean(dists_est)
     comp = np.mean(dists_gt)
+    #   perc_th = 2.0
+    #   acc = (len(np.where(dists_est <= perc_th)[0]) / len(dists_est))
+    #   comp = (len(np.where(dists_gt <= perc_th)[0]) / len(dists_gt))
+
+
 
     # measure incremental precision and recall values with thesholds from (0, 10*max_dist)
     th_vals = np.linspace(0, 3*max_dist, num=50)
@@ -241,6 +287,7 @@ def main():
         est_ply_path = os.path.join(points_path, est_ply_filename)
         est_ply = read_point_cloud(est_ply_path)
         est_ply = downsample_cloud(est_ply, ARGS.min_point_dist)
+        #est_ply = remove_close_points(est_ply, ARGS.min_point_dist)
 
         gt_ply_filename = "stl{:03d}_total.ply".format(scan_num)
         gt_ply_path = os.path.join(ARGS.data_path, "Points", "stl", gt_ply_filename)
@@ -268,6 +315,7 @@ def main():
         print("Num GT: {}".format(int(gt_size)))
         print("Accuracy: {:0.4f}".format(acc))
         print("Completeness: {:0.4f}".format(comp))
+        print("Overall: {:0.4f}".format((acc+comp)/2.0))
         print("Precision: {:0.4f}".format(prec))
         print("Recall: {:0.4f}".format(rec))
         print("Elapsed time: {:0.3f} s".format(dur))
@@ -315,6 +363,7 @@ def main():
             f.write("Target point cloud size: {}\n".format(gt_size))
             f.write("Accuracy: {:0.3f}mm\n".format(acc))
             f.write("Completness: {:0.3f}mm\n".format(comp))
+            f.write("Overall: {:0.4f}\n".format((acc+comp)/2.0))
             f.write("Precision: {:0.3f}\n".format(prec))
             f.write("Recall: {:0.3f}\n".format(rec))
 
@@ -327,12 +376,21 @@ def main():
         avg_rec         += rec
         avg_dur         += dur
 
+        # cleanup data
+        del est_ply
+        del gt_ply
+        del precision_ply
+        del recall_ply
+        del acc_outliers_ply
+        del comp_outliers_ply
+
     # display average evaluation
     print("\nAveraged evaluation..")
     print("Num Est: {}".format(int(avg_est_size // num_evals)))
     print("Num GT: {}".format(int(avg_gt_size // num_evals)))
     print("Accuracy: {:0.4f}".format(avg_acc / num_evals))
     print("Completeness: {:0.4f}".format(avg_comp / num_evals))
+    print("Overall: {:0.4f}".format(((avg_acc/num_evals)+(avg_comp/num_evals))/2.0))
     print("Precision: {:0.4f}".format(avg_prec / num_evals))
     print("Recall: {:0.4f}".format(avg_rec / num_evals))
     print("Elapsed time: {:0.3f} s".format(avg_dur / num_evals))
